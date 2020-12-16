@@ -1,15 +1,25 @@
 use bimap::{BiHashMap, BiBTreeMap};
 use std::hash::Hash;
 
+/// LRUキャッシュのためのデータストレージ用trait
+///
+/// たとえば、ファイルIOをこれでラップするなどする
 pub trait CacheBackend {
+    /// データの識別に使う型
     type Index: Clone;
+    /// データ自体の型
     type Item;
 
+    /// 指定したデータ(存在しないならNone)を取り出す
     fn load_from_backend(&mut self, index: &Self::Index) -> Option<Self::Item>;
+    /// キャッシュからデータを書き戻す
+    /// 新規に追加されたデータまたはキャッシュされている間に変更されたデータの場合は`updated=true`になる
     fn write_back(&mut self, index: Self::Index, item: Self::Item, updated: bool);
+    /// キャッシュの容量制限に利用するデータサイズを計算する
     fn get_weight(&mut self, _index: &Self::Index, _item: &Self::Item) -> usize { 1 }
 }
 
+/// キャッシュの内部で利用するBiMap用trait　キャッシュの利用側での実装は必要ない
 pub trait CacheBiMapBackend<Left> {
     fn new() -> Self;
     fn get_by_left(&mut self, left: &Left) -> Option<usize>;
@@ -93,6 +103,8 @@ struct CacheItem<Index, Item> {
     updated: bool,
 }
 
+/// LRUキャッシュの実装本体
+/// 基本的にはtype定義を利用してください
 #[derive(PartialEq, Debug)]
 pub struct LRU<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> {
     cache: Vec<CacheItem<Back::Index, Back::Item>>,
@@ -103,14 +115,21 @@ pub struct LRU<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> {
     capacity: usize,
 }
 
+/// 内部にBiHashMapを利用するLRUキャッシュ
+/// `Back::Index : Eq + Hash` が必要
 pub type LRUCache<Back> = LRU<Back, BiHashMap<<Back as CacheBackend>::Index, usize>>;
+
+/// 内部にBiBTreeMapを利用するLRUキャッシュ
+/// `Back::Index : Ord` が必要
 pub type BTreeLRUCache<Back> = LRU<Back, BiBTreeMap<<Back as CacheBackend>::Index, usize>>;
 
 impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
+    /// with_capacity(backend, 10)
     pub fn new(backend: Back) -> Self {
         Self::with_capacity(backend, 10)
     }
 
+    /// バックエンドと容量制限を設定してキャッシュを作成
     pub fn with_capacity(backend: Back, capacity: usize) -> Self {
         Self {
             cache: Vec::new(),
@@ -122,22 +141,28 @@ impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
         }
     }
 
+    /// キャッシュからデータを取得する
     pub fn get(&mut self, index: &Back::Index) -> Option<&Back::Item> {
         self.get_inner(index, false).map(|v| v as &Back::Item)
     }
 
+    /// キャッシュからデータを変更可能で取得する
     pub fn get_mut(&mut self, index: &Back::Index) -> Option<&mut Back::Item> {
         self.get_inner(index, true)
     }
 
+    /// キャッシュにデータを追加する
+    /// 追加したデータはライトバック方式でバックエンドに書き込まれる
     pub fn insert(&mut self, index: Back::Index, item: Back::Item) {
         self.insert_cache(index, item, true)
     }
 
+    /// バックエンドのオブジェクトを取得する
     pub fn get_backend(&self) -> &Back {
         &self.backend
     }
 
+    /// バックエンドのオブジェクトを取得する
     pub fn get_backend_mut(&mut self) -> &mut Back {
         &mut self.backend
     }
