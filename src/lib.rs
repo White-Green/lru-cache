@@ -214,10 +214,11 @@ impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
             item,
             updated,
         };
-        while self.weight_sum > self.capacity {
+        let weight = self.backend.get_weight(&index, &item.item);
+        while self.cache.len() > 0 && self.weight_sum + weight > self.capacity {
             self.weight_sum -= self.unload_newest();
         }
-        self.weight_sum += self.backend.get_weight(&index, &item.item);
+        self.weight_sum += weight;
         self.map.insert(index, self.cache.len());
         self.cache.push(item);
     }
@@ -262,7 +263,7 @@ mod tests {
 
     #[test]
     fn check_algorithm() {
-        let mut cache = LRUCache::with_capacity(VecDeque::new(), 2);
+        let mut cache = LRUCache::with_capacity(VecDeque::new(), 3);
         cache.insert(0, 0);
         assert_eq!(cache.map.len(), 1);
         cache.insert(1, 1);
