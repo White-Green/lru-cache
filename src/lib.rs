@@ -1,5 +1,10 @@
-use bimap::{BiHashMap, BiBTreeMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::hash::Hash;
+use std::rc::Rc;
+
+use crate::linked_list::{LinkedList, LinkedListNode};
+
+mod linked_list;
 
 /// LRUキャッシュのためのデータストレージ用trait
 ///
@@ -20,84 +25,51 @@ pub trait CacheBackend {
 }
 
 /// キャッシュの内部で利用するBiMap用trait　キャッシュの利用側での実装は必要ない
-pub trait CacheBiMapBackend<Left> {
+pub trait CacheMapBackend<Key> {
     fn new() -> Self;
-    fn get_by_left(&mut self, left: &Left) -> Option<usize>;
-    fn get_by_right(&mut self, right: usize) -> Option<&Left>;
-    fn swap_by_right(&mut self, a: usize, b: usize);
-    fn remove_by_right(&mut self, right: usize);
-    fn insert(&mut self, left: Left, right: usize);
+    fn get(&mut self, left: &Key) -> Option<&Rc<LinkedListNode<usize>>>;
+    fn remove(&mut self, key: &Key) -> Option<Rc<LinkedListNode<usize>>>;
+    fn insert(&mut self, key: Key, value: Rc<LinkedListNode<usize>>);
 }
 
-impl<Left: Eq + Hash> CacheBiMapBackend<Left> for BiHashMap<Left, usize> {
+impl<Key: Eq + Hash> CacheMapBackend<Key> for HashMap<Key, Rc<LinkedListNode<usize>>> {
     fn new() -> Self {
-        BiHashMap::new()
+        HashMap::new()
     }
 
-    fn get_by_left(&mut self, left: &Left) -> Option<usize> {
-        Self::get_by_left(self, left).copied()
+    fn get(&mut self, left: &Key) -> Option<&Rc<LinkedListNode<usize>>> {
+        Self::get(self, left)
     }
 
-    fn get_by_right(&mut self, right: usize) -> Option<&Left> {
-        Self::get_by_right(self, &right)
+    fn remove(&mut self, key: &Key) -> Option<Rc<LinkedListNode<usize>>> {
+        Self::remove(self, key)
     }
 
-    fn swap_by_right(&mut self, a: usize, b: usize) {
-        let a = Self::remove_by_right(self, &a);
-        let b = Self::remove_by_right(self, &b);
-        if let (Some(a), Some(b)) = (a, b) {
-            Self::insert(self, a.0, b.1);
-            Self::insert(self, b.0, a.1);
-        } else {
-            unreachable!()
-        }
-    }
-
-    fn remove_by_right(&mut self, right: usize) {
-        Self::remove_by_right(self, &right);
-    }
-
-    fn insert(&mut self, left: Left, right: usize) {
+    fn insert(&mut self, left: Key, right: Rc<LinkedListNode<usize>>) {
         Self::insert(self, left, right);
     }
 }
 
-impl<Left: Ord> CacheBiMapBackend<Left> for BiBTreeMap<Left, usize> {
+impl<Key: Ord> CacheMapBackend<Key> for BTreeMap<Key, Rc<LinkedListNode<usize>>> {
     fn new() -> Self {
-        BiBTreeMap::new()
+        BTreeMap::new()
     }
 
-    fn get_by_left(&mut self, left: &Left) -> Option<usize> {
-        Self::get_by_left(self, left).copied()
+    fn get(&mut self, key: &Key) -> Option<&Rc<LinkedListNode<usize>>> {
+        Self::get(self, key)
     }
 
-    fn get_by_right(&mut self, right: usize) -> Option<&Left> {
-        Self::get_by_right(self, &right)
+    fn remove(&mut self, key: &Key) -> Option<Rc<LinkedListNode<usize>>> {
+        Self::remove(self, key)
     }
 
-    fn swap_by_right(&mut self, a: usize, b: usize) {
-        let a = Self::remove_by_right(self, &a);
-        let b = Self::remove_by_right(self, &b);
-        if let (Some(a), Some(b)) = (a, b) {
-            Self::insert(self, a.0, b.1);
-            Self::insert(self, b.0, a.1);
-        } else {
-            unreachable!()
-        }
-    }
-
-    fn remove_by_right(&mut self, right: usize) {
-        Self::remove_by_right(self, &right);
-    }
-
-    fn insert(&mut self, left: Left, right: usize) {
-        Self::insert(self, left, right);
+    fn insert(&mut self, key: Key, value: Rc<LinkedListNode<usize>>) {
+        Self::insert(self, key, value);
     }
 }
 
 #[derive(PartialEq, Debug)]
 struct CacheItem<Index, Item> {
-    accessed_time: usize,
     index: Index,
     item: Item,
     updated: bool,
@@ -105,25 +77,26 @@ struct CacheItem<Index, Item> {
 
 /// LRUキャッシュの実装本体
 /// 基本的にはtype定義を利用してください
-#[derive(PartialEq, Debug)]
-pub struct LRU<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> {
-    cache: Vec<CacheItem<Back::Index, Back::Item>>,
+#[derive(Debug)]
+pub struct LRU<Back: CacheBackend, Map: CacheMapBackend<Back::Index>> {
+    cache: Vec<Option<CacheItem<Back::Index, Back::Item>>>,
+    spaces: VecDeque<usize>,
+    list: LinkedList<usize>,
     backend: Back,
     map: Map,
-    current_time: usize,
     weight_sum: usize,
     capacity: usize,
 }
 
 /// 内部にBiHashMapを利用するLRUキャッシュ
 /// `Back::Index : Eq + Hash` が必要
-pub type LRUCache<Back> = LRU<Back, BiHashMap<<Back as CacheBackend>::Index, usize>>;
+pub type LRUCache<Back> = LRU<Back, HashMap<<Back as CacheBackend>::Index, Rc<LinkedListNode<usize>>>>;
 
 /// 内部にBiBTreeMapを利用するLRUキャッシュ
 /// `Back::Index : Ord` が必要
-pub type BTreeLRUCache<Back> = LRU<Back, BiBTreeMap<<Back as CacheBackend>::Index, usize>>;
+pub type BTreeLRUCache<Back> = LRU<Back, BTreeMap<<Back as CacheBackend>::Index, Rc<LinkedListNode<usize>>>>;
 
-impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
+impl<Back: CacheBackend, Map: CacheMapBackend<Back::Index>> LRU<Back, Map> {
     /// with_capacity(backend, 10)
     pub fn new(backend: Back) -> Self {
         Self::with_capacity(backend, 10)
@@ -133,9 +106,10 @@ impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
     pub fn with_capacity(backend: Back, capacity: usize) -> Self {
         Self {
             cache: Vec::new(),
+            spaces: VecDeque::new(),
+            list: LinkedList::new(),
             backend,
             map: Map::new(),
-            current_time: 0,
             weight_sum: 0,
             capacity,
         }
@@ -168,48 +142,26 @@ impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
     }
 }
 
-impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
+impl<Back: CacheBackend, Map: CacheMapBackend<Back::Index>> LRU<Back, Map> {
     fn get_inner(&mut self, index: &Back::Index, update: bool) -> Option<&mut Back::Item> {
-        if let Some(i) = self.map.get_by_left(&index) {
-            let mut value = self.cache.swap_remove(i);
-            self.current_time += 1;
-            value.accessed_time = self.current_time;
-            value.updated |= update;
-            let x = self.map.get_by_right(self.cache.len()).unwrap().clone();
-            self.map.insert(x, i);
-            self.recursive_swap(i);
-            self.map.insert(index.clone(), self.cache.len());
-            self.cache.push(value);
-            self.cache.last_mut().map(|v| &mut v.item)
+        if let Some(i) = self.map.get(&index) {
+            // println!("{:#?}", self.list);
+            self.list.move_to_last(i);
+            // println!("{:#?}", self.list);
+            self.cache.get_mut(i.value).map(Option::as_mut).flatten().map(|v| {
+                v.updated |= update;
+                &mut v.item
+            })
         } else if let Some(item) = self.backend.load_from_backend(index) {
             self.insert_cache(index.clone(), item, update);
-            self.cache.last_mut().map(|v| &mut v.item)
+            self.cache.get_mut(self.map.get(&index).unwrap().value).map(Option::as_mut).flatten().map(|v| &mut v.item)
         } else {
             None
         }
     }
 
-    fn recursive_swap(&mut self, mut current: usize) {
-        while current * 2 + 1 < self.cache.len() {
-            if self.cache[current].accessed_time < self.cache[current * 2 + 1].accessed_time &&
-                (current * 2 + 2 >= self.cache.len() || self.cache[current].accessed_time < self.cache[current * 2 + 2].accessed_time) {
-                break;
-            } else if current * 2 + 2 >= self.cache.len() || self.cache[current * 2 + 1].accessed_time < self.cache[current * 2 + 2].accessed_time {
-                self.map.swap_by_right(current, current * 2 + 1);
-                self.cache.swap(current, current * 2 + 1);
-                current = current * 2 + 1;
-            } else {
-                self.map.swap_by_right(current, current * 2 + 2);
-                self.cache.swap(current, current * 2 + 2);
-                current = current * 2 + 2;
-            }
-        }
-    }
-
     fn insert_cache(&mut self, index: Back::Index, item: Back::Item, updated: bool) {
-        self.current_time += 1;
         let item = CacheItem {
-            accessed_time: self.current_time,
             index: index.clone(),
             item,
             updated,
@@ -219,27 +171,35 @@ impl<Back: CacheBackend, Map: CacheBiMapBackend<Back::Index>> LRU<Back, Map> {
             self.weight_sum -= self.unload_newest();
         }
         self.weight_sum += weight;
-        self.map.insert(index, self.cache.len());
-        self.cache.push(item);
+        let (cache_index, space) = if let Some(space) = self.spaces.pop_front() {
+            (space, self.cache.get_mut(space).unwrap())
+        } else {
+            let len = self.cache.len();
+            self.cache.push(None);
+            (len, self.cache.last_mut().unwrap())
+        };
+        self.map.insert(index, self.list.push(cache_index));
+        space.replace(item);
     }
 
     fn unload_newest(&mut self) -> usize {
-        if self.cache.is_empty() { return 0; }
-        self.map.swap_by_right(0, self.cache.len() - 1);
-        self.map.remove_by_right(self.cache.len() - 1);
-        let item = self.cache.swap_remove(0);
-        let weight = self.backend.get_weight(&item.index, &item.item);
-        self.recursive_swap(0);
-        self.backend.write_back(item.index, item.item, item.updated);
-        weight
+        if let Some(oldest) = self.list.remove_first() {
+            let item = self.cache.get_mut(oldest.value).unwrap().take().unwrap();
+            self.spaces.push_back(self.map.remove(&item.index).unwrap().value);
+            let weight = self.backend.get_weight(&item.index, &item.item);
+            self.backend.write_back(item.index, item.item, item.updated);
+            weight
+        } else { 0 }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CacheBackend, LRUCache};
-    use self::Log::{Load, Write};
     use std::collections::VecDeque;
+
+    use super::{CacheBackend, LRUCache};
+
+    use self::Log::{Load, Write};
 
     #[derive(PartialEq, Debug)]
     enum Log {
@@ -265,19 +225,13 @@ mod tests {
     fn check_algorithm() {
         let mut cache = LRUCache::with_capacity(VecDeque::new(), 3);
         cache.insert(0, 0);
-        assert_eq!(cache.map.len(), 1);
         cache.insert(1, 1);
-        assert_eq!(cache.map.len(), 2);
         cache.insert(2, 2);
-        assert_eq!(cache.map.len(), 3);
         cache.insert(3, 3);
-        assert_eq!(cache.map.len(), 3);
         assert_eq!(cache.backend.pop_front(), Some(Write(0, true)));
         cache.insert(4, 4);
-        assert_eq!(cache.map.len(), 3);
         assert_eq!(cache.backend.pop_front(), Some(Write(1, true)));
         cache.insert(5, 5);
-        assert_eq!(cache.map.len(), 3);
         assert_eq!(cache.backend.pop_front(), Some(Write(2, true)));
         assert_eq!(cache.get(&0), Some(&0));
         assert_eq!(cache.backend.pop_front(), Some(Load(0)));
