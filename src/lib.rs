@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::hash::Hash;
-use std::rc::Rc;
 
 use crate::linked_list::{LinkedList, LinkedListNode};
+use std::sync::Arc;
 
 mod linked_list;
 
@@ -27,43 +27,43 @@ pub trait CacheBackend {
 /// キャッシュの内部で利用するBiMap用trait　キャッシュの利用側での実装は必要ない
 pub trait CacheMapBackend<Key> {
     fn new() -> Self;
-    fn get(&mut self, left: &Key) -> Option<&Rc<LinkedListNode<usize>>>;
-    fn remove(&mut self, key: &Key) -> Option<Rc<LinkedListNode<usize>>>;
-    fn insert(&mut self, key: Key, value: Rc<LinkedListNode<usize>>);
+    fn get(&mut self, left: &Key) -> Option<&Arc<LinkedListNode<usize>>>;
+    fn remove(&mut self, key: &Key) -> Option<Arc<LinkedListNode<usize>>>;
+    fn insert(&mut self, key: Key, value: Arc<LinkedListNode<usize>>);
 }
 
-impl<Key: Eq + Hash> CacheMapBackend<Key> for HashMap<Key, Rc<LinkedListNode<usize>>> {
+impl<Key: Eq + Hash> CacheMapBackend<Key> for HashMap<Key, Arc<LinkedListNode<usize>>> {
     fn new() -> Self {
         HashMap::new()
     }
 
-    fn get(&mut self, left: &Key) -> Option<&Rc<LinkedListNode<usize>>> {
+    fn get(&mut self, left: &Key) -> Option<&Arc<LinkedListNode<usize>>> {
         Self::get(self, left)
     }
 
-    fn remove(&mut self, key: &Key) -> Option<Rc<LinkedListNode<usize>>> {
+    fn remove(&mut self, key: &Key) -> Option<Arc<LinkedListNode<usize>>> {
         Self::remove(self, key)
     }
 
-    fn insert(&mut self, left: Key, right: Rc<LinkedListNode<usize>>) {
+    fn insert(&mut self, left: Key, right: Arc<LinkedListNode<usize>>) {
         Self::insert(self, left, right);
     }
 }
 
-impl<Key: Ord> CacheMapBackend<Key> for BTreeMap<Key, Rc<LinkedListNode<usize>>> {
+impl<Key: Ord> CacheMapBackend<Key> for BTreeMap<Key, Arc<LinkedListNode<usize>>> {
     fn new() -> Self {
         BTreeMap::new()
     }
 
-    fn get(&mut self, key: &Key) -> Option<&Rc<LinkedListNode<usize>>> {
+    fn get(&mut self, key: &Key) -> Option<&Arc<LinkedListNode<usize>>> {
         Self::get(self, key)
     }
 
-    fn remove(&mut self, key: &Key) -> Option<Rc<LinkedListNode<usize>>> {
+    fn remove(&mut self, key: &Key) -> Option<Arc<LinkedListNode<usize>>> {
         Self::remove(self, key)
     }
 
-    fn insert(&mut self, key: Key, value: Rc<LinkedListNode<usize>>) {
+    fn insert(&mut self, key: Key, value: Arc<LinkedListNode<usize>>) {
         Self::insert(self, key, value);
     }
 }
@@ -90,11 +90,11 @@ pub struct LRU<Back: CacheBackend, Map: CacheMapBackend<Back::Index>> {
 
 /// 内部にBiHashMapを利用するLRUキャッシュ
 /// `Back::Index : Eq + Hash` が必要
-pub type LRUCache<Back> = LRU<Back, HashMap<<Back as CacheBackend>::Index, Rc<LinkedListNode<usize>>>>;
+pub type LRUCache<Back> = LRU<Back, HashMap<<Back as CacheBackend>::Index, Arc<LinkedListNode<usize>>>>;
 
 /// 内部にBiBTreeMapを利用するLRUキャッシュ
 /// `Back::Index : Ord` が必要
-pub type BTreeLRUCache<Back> = LRU<Back, BTreeMap<<Back as CacheBackend>::Index, Rc<LinkedListNode<usize>>>>;
+pub type BTreeLRUCache<Back> = LRU<Back, BTreeMap<<Back as CacheBackend>::Index, Arc<LinkedListNode<usize>>>>;
 
 impl<Back: CacheBackend, Map: CacheMapBackend<Back::Index>> LRU<Back, Map> {
     /// with_capacity(backend, 10)

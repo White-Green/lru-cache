@@ -1,18 +1,17 @@
-use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::Deref;
-use std::rc::{Rc, Weak};
+use std::sync::{Arc, RwLock, Weak};
 
 #[derive(Debug)]
 pub(crate) struct LinkedList<T> {
-    first: Option<Rc<LinkedListNode<T>>>,
-    last: Option<Rc<LinkedListNode<T>>>,
+    first: Option<Arc<LinkedListNode<T>>>,
+    last: Option<Arc<LinkedListNode<T>>>,
 }
 
 #[derive(Debug)]
 pub struct LinkedListNode<T> {
-    next: RefCell<Option<Rc<LinkedListNode<T>>>>,
-    prev: RefCell<Option<Weak<LinkedListNode<T>>>>,
+    next: RwLock<Option<Arc<LinkedListNode<T>>>>,
+    prev: RwLock<Option<Weak<LinkedListNode<T>>>>,
     pub value: T,
 }
 
@@ -21,50 +20,50 @@ impl<T> LinkedList<T> {
         Self { first: None, last: None }
     }
 
-    fn set_node_last(&mut self, node: &Rc<LinkedListNode<T>>) {
+    fn set_node_last(&mut self, node: &Arc<LinkedListNode<T>>) {
         if let Some(last) = &self.last {
-            node.prev.replace(Some(Rc::downgrade(last)));
-            last.next.replace(Some(Rc::clone(&node)));
+            *node.prev.write().unwrap() = Some(Arc::downgrade(last));
+            *last.next.write().unwrap() = Some(Arc::clone(&node));
         } else if let None = self.first {
-            self.first = Some(Rc::clone(&node));
+            self.first = Some(Arc::clone(&node));
         }
-        self.last = Some(Rc::clone(&node));
+        self.last = Some(Arc::clone(&node));
     }
 
-    pub fn push(&mut self, value: T) -> Rc<LinkedListNode<T>> {
-        let node = Rc::new(LinkedListNode {
-            next: RefCell::new(None),
-            prev: RefCell::new(None),
+    pub fn push(&mut self, value: T) -> Arc<LinkedListNode<T>> {
+        let node = Arc::new(LinkedListNode {
+            next: RwLock::new(None),
+            prev: RwLock::new(None),
             value,
         });
         self.set_node_last(&node);
         node
     }
 
-    pub fn move_to_last(&mut self, node: &Rc<LinkedListNode<T>>) {
-        let prev = node.prev.borrow().as_ref().cloned();
-        let next = node.next.borrow().as_ref().cloned();
-        if let Some(next) = node.next.borrow().deref() {
-            next.prev.replace(prev);
+    pub fn move_to_last(&mut self, node: &Arc<LinkedListNode<T>>) {
+        let prev = node.prev.read().unwrap().as_ref().cloned();
+        let next = node.next.read().unwrap().as_ref().cloned();
+        if let Some(next) = node.next.read().unwrap().deref() {
+            *next.prev.write().unwrap() = prev;
         } else {
             self.last = prev.map(|prev| prev.upgrade().unwrap());
         }
-        if let Some(prev) = node.prev.borrow().deref() {
-            prev.upgrade().unwrap().next.replace(next);
+        if let Some(prev) = node.prev.read().unwrap().deref() {
+            *prev.upgrade().unwrap().next.write().unwrap() = next;
         } else {
             self.first = next;
         }
-        node.next.replace(None);
-        node.prev.replace(None);
+        *node.next.write().unwrap() = None;
+        *node.prev.write().unwrap() = None;
         self.set_node_last(node);
     }
 
-    pub fn remove_first(&mut self) -> Option<Rc<LinkedListNode<T>>> {
+    pub fn remove_first(&mut self) -> Option<Arc<LinkedListNode<T>>> {
         if let Some(first) = self.first.take() {
-            if let Some(next) = first.next.borrow().deref() {
-                next.prev.replace(None);
+            if let Some(next) = first.next.read().unwrap().deref() {
+                *next.prev.write().unwrap() = None;
             } else { self.last = None; }
-            self.first = first.next.borrow().deref().clone();
+            self.first = first.next.read().unwrap().deref().clone();
             Some(first)
         } else { None }
     }
@@ -73,7 +72,7 @@ impl<T> LinkedList<T> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use crate::linked_list::LinkedList;
 
@@ -86,19 +85,19 @@ mod tests {
         let rc4 = list.push(4);
         let rc5 = list.push(5);
         let mut map = HashMap::new();
-        map.insert(Rc::as_ptr(&rc1), 1);
-        map.insert(Rc::as_ptr(&rc2), 2);
-        map.insert(Rc::as_ptr(&rc3), 3);
-        map.insert(Rc::as_ptr(&rc4), 4);
-        map.insert(Rc::as_ptr(&rc5), 5);
+        map.insert(Arc::as_ptr(&rc1), 1);
+        map.insert(Arc::as_ptr(&rc2), 2);
+        map.insert(Arc::as_ptr(&rc3), 3);
+        map.insert(Arc::as_ptr(&rc4), 4);
+        map.insert(Arc::as_ptr(&rc5), 5);
         list.move_to_last(&rc3);
         list.move_to_last(&rc1);
         list.move_to_last(&rc1);
-        assert_eq!(list.remove_first().map(|rc| Rc::as_ptr(&rc)), Some(Rc::as_ptr(&rc2)));
-        assert_eq!(list.remove_first().map(|rc| Rc::as_ptr(&rc)), Some(Rc::as_ptr(&rc4)));
-        assert_eq!(list.remove_first().map(|rc| Rc::as_ptr(&rc)), Some(Rc::as_ptr(&rc5)));
-        assert_eq!(list.remove_first().map(|rc| Rc::as_ptr(&rc)), Some(Rc::as_ptr(&rc3)));
-        assert_eq!(list.remove_first().map(|rc| Rc::as_ptr(&rc)), Some(Rc::as_ptr(&rc1)));
-        assert_eq!(list.remove_first().map(|rc| Rc::as_ptr(&rc)), None);
+        assert_eq!(list.remove_first().map(|rc| Arc::as_ptr(&rc)), Some(Arc::as_ptr(&rc2)));
+        assert_eq!(list.remove_first().map(|rc| Arc::as_ptr(&rc)), Some(Arc::as_ptr(&rc4)));
+        assert_eq!(list.remove_first().map(|rc| Arc::as_ptr(&rc)), Some(Arc::as_ptr(&rc5)));
+        assert_eq!(list.remove_first().map(|rc| Arc::as_ptr(&rc)), Some(Arc::as_ptr(&rc3)));
+        assert_eq!(list.remove_first().map(|rc| Arc::as_ptr(&rc)), Some(Arc::as_ptr(&rc1)));
+        assert_eq!(list.remove_first().map(|rc| Arc::as_ptr(&rc)), None);
     }
 }
